@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Neuschwanstein Castle 3D View</title>
+  <style>
+    body { 
+      margin: 0; 
+      overflow: hidden; 
+      font-family: Arial, sans-serif;
+    }
+    canvas { display: block; }
+    #controls {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      z-index: 100;
+    }
+    #controlPanel {
+      background: rgba(255, 255, 255, 0.8);
+      padding: 10px;
+      border-radius: 8px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+      display: none;
+      max-width: 600px;
+      margin: 0 auto 10px;
+    }
+    .control-group { margin-bottom: 10px; }
+    button {
+      padding: 8px 12px;
+      margin: 5px;
+      font-size: 14px;
+      cursor: pointer;
+      background: #4a86e8;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      transition: background 0.3s;
+    }
+    button:hover { background: #3a76d8; }
+    #toggleControls {
+      background: rgba(74, 134, 232, 0.8);
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+      font-size: 24px;
+    }
+    .slider-container {
+      display: flex;
+      align-items: center;
+      margin: 10px 0;
+    }
+    .slider-container label {
+      width: 120px;
+      text-align: right;
+      margin-right: 10px;
+    }
+    input[type="range"] {
+      flex-grow: 1;
+      max-width: 200px;
+    }
+    #loadingScreen {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      background: #87CEEB;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      color: white;
+      font-size: 24px;
+      z-index: 1000;
+    }
+    .spinner {
+      border: 6px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top: 6px solid #ffffff;
+      width: 50px;
+      height: 50px;
+      animation: spin 1s linear infinite;
+      margin-bottom: 20px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    #info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 8px;
+      border-radius: 4px;
+      font-size: 14px;
+      max-width: 400px;
+      display: none;
+    }
+    @media (max-width: 768px) {
+      #controls { bottom: 20px; width: 90%; }
+      #controlPanel { width: 100%; box-sizing: border-box; }
+      .slider-container {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .slider-container label { width: 100%; text-align: left; margin-bottom: 5px; }
+      input[type="range"] { width: 100%; max-width: none; }
+      #info { max-width: 300px; font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="loadingScreen">
+    <div class="spinner"></div>
+    <p>Creating your magical castle...</p>
+  </div>
+  
+  <div id="info">Click and drag to rotate. Scroll to zoom. Right-click and drag to pan.</div>
+  
+  <div id="controls">
+    <div id="controlPanel">
+      <div class="control-group">
+        <button id="resetCamera">Reset View</button>
+        <button id="toggleAutoRotate">Start Auto Rotate</button>
+        <button id="toggleInfo">Show Info</button>
+      </div>
+      <div class="control-group">
+        <div class="slider-container">
+          <label for="rotateSpeed">Rotation Speed:</label>
+          <input type="range" id="rotateSpeed" min="0" max="5" step="0.1" value="1">
+        </div>
+        <div class="slider-container">
+          <label for="fogDensity">Fog Density:</label>
+          <input type="range" id="fogDensity" min="0" max="0.01" step="0.0005" value="0.002">
+        </div>
+        <div class="slider-container">
+          <label for="timeOfDay">Time of Day:</label>
+          <input type="range" id="timeOfDay" min="0" max="1" step="0.01" value="0.5">
+        </div>
+      </div>
+      <div class="control-group">
+        <button id="viewFront">Front View</button>
+        <button id="viewBack">Back View</button>
+        <button id="viewTop">Top View</button>
+        <button id="viewOverall">Scenic View</button>
+      </div>
+      <div class="control-group">
+        <button id="toggleMagicMode">Enable Magic Mode</button>
+        <button id="toggleSnow">Toggle Snow</button>
+      </div>
+    </div>
+    <button id="toggleControls">⚙️</button>
+  </div>
+  
+  <!-- Include Three.js from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>
+    // --- Custom Orbit Controls ---
+    function createOrbitControls(camera, domElement) {
+      const controls = {
+        target: new THREE.Vector3(0, 15, 0),
+        autoRotate: false,
+        autoRotateSpeed: 1.0,
+        enableDamping: true,
+        dampingFactor: 0.05,
+        minDistance: 20,
+        maxDistance: 200,
+        minPolarAngle: 0,
+        maxPolarAngle: Math.PI / 2,
+        rotateStart: new THREE.Vector2(),
+        rotateEnd: new THREE.Vector2(),
+        rotateDelta: new THREE.Vector2(),
+        panStart: new THREE.Vector2(),
+        panEnd: new THREE.Vector2(),
+        panDelta: new THREE.Vector2(),
+        dollyStart: new THREE.Vector2(),
+        dollyEnd: new THREE.Vector2(),
+        dollyDelta: new THREE.Vector2(),
+        STATE: { NONE: -1, ROTATE: 0, DOLLY: 1, PAN: 2 },
+        state: -1,
+        update: function() {
+          const position = camera.position;
+          const offset = position.clone().sub(this.target);
+          const spherical = new THREE.Spherical().setFromVector3(offset);
+          if (this.autoRotate && this.state === this.STATE.NONE) {
+            spherical.theta += this.autoRotateSpeed * 0.01;
+          }
+          spherical.phi = Math.max(this.minPolarAngle, Math.min(this.maxPolarAngle, spherical.phi));
+          spherical.radius = Math.max(this.minDistance, Math.min(this.maxDistance, spherical.radius));
+          offset.setFromSpherical(spherical);
+          position.copy(this.target).add(offset);
+          camera.lookAt(this.target);
+          return false;
+        }
+      };
+      
+      function onMouseDown(event) {
+        event.preventDefault();
+        if (event.button === 0) {
+          controls.state = controls.STATE.ROTATE;
+          controls.rotateStart.set(event.clientX, event.clientY);
+        } else if (event.button === 1) {
+          controls.state = controls.STATE.DOLLY;
+          controls.dollyStart.set(event.clientX, event.clientY);
+        } else if (event.button === 2) {
+          controls.state = controls.STATE.PAN;
+          controls.panStart.set(event.clientX, event.clientY);
+        }
+        document.addEventListener('mousemove', onMouseMove, false);
+        document.addEventListener('mouseup', onMouseUp, false);
+      }
+      
+      function onMouseMove(event) {
+        event.preventDefault();
+        if (controls.state === controls.STATE.ROTATE) {
+          controls.rotateEnd.set(event.clientX, event.clientY);
+          controls.rotateDelta.subVectors(controls.rotateEnd, controls.rotateStart);
+          const element = domElement;
+          const offset = camera.position.clone().sub(controls.target);
+          const spherical = new THREE.Spherical().setFromVector3(offset);
+          spherical.theta -= 2 * Math.PI * controls.rotateDelta.x / element.clientWidth;
+          spherical.phi -= 2 * Math.PI * controls.rotateDelta.y / element.clientHeight;
+          offset.setFromSpherical(spherical);
+          camera.position.copy(controls.target).add(offset);
+          camera.lookAt(controls.target);
+          controls.rotateStart.copy(controls.rotateEnd);
+        } else if (controls.state === controls.STATE.DOLLY) {
+          controls.dollyEnd.set(event.clientX, event.clientY);
+          controls.dollyDelta.subVectors(controls.dollyEnd, controls.dollyStart);
+          const dollySpeed = 0.05;
+          const offset = camera.position.clone().sub(controls.target);
+          if (controls.dollyDelta.y > 0) {
+            offset.multiplyScalar(1 - dollySpeed);
+          } else if (controls.dollyDelta.y < 0) {
+            offset.multiplyScalar(1 + dollySpeed);
+          }
+          camera.position.copy(controls.target).add(offset);
+          controls.dollyStart.copy(controls.dollyEnd);
+        } else if (controls.state === controls.STATE.PAN) {
+          controls.panEnd.set(event.clientX, event.clientY);
+          controls.panDelta.subVectors(controls.panEnd, controls.panStart);
+          const panSpeed = 0.1;
+          const element = domElement;
+          const deltaX = -2 * panSpeed * controls.panDelta.x / element.clientWidth;
+          const deltaY = 2 * panSpeed * controls.panDelta.y / element.clientHeight;
+          const offset = camera.position.clone().sub(controls.target);
+          const targetDistance = offset.length();
+          const panOffset = new THREE.Vector3();
+          const v = new THREE.Vector3();
+          v.setFromMatrixColumn(camera.matrix, 0);
+          v.multiplyScalar(deltaX * targetDistance);
+          panOffset.add(v);
+          v.setFromMatrixColumn(camera.matrix, 1);
+          v.multiplyScalar(deltaY * targetDistance);
+          panOffset.add(v);
+          camera.position.add(panOffset);
+          controls.target.add(panOffset);
+          controls.panStart.copy(controls.panEnd);
+        }
+      }
+      
+      function onMouseUp() {
+        document.removeEventListener('mousemove', onMouseMove, false);
+        document.removeEventListener('mouseup', onMouseUp, false);
+        controls.state = controls.STATE.NONE;
+      }
+      
+      function onMouseWheel(event) {
+        event.preventDefault();
+        const zoomSpeed = 0.1;
+        const offset = camera.position.clone().sub(controls.target);
+        const newLength = event.deltaY < 0 ? offset.length() * (1 - zoomSpeed) : offset.length() * (1 + zoomSpeed);
+        offset.normalize().multiplyScalar(newLength);
+        camera.position.copy(controls.target).add(offset);
+      }
+      
+      function onTouchStart(event) {
+        event.preventDefault();
+        switch (event.touches.length) {
+          case 1:
+            controls.state = controls.STATE.ROTATE;
+            controls.rotateStart.set(event.touches[0].pageX, event.touches[0].pageY);
+            break;
+          case 2:
+            const dx = event.touches[0].pageX - event.touches[1].pageX;
+            const dy = event.touches[0].pageY - event.touches[1].pageY;
+            controls.dollyStart.set(0, Math.sqrt(dx * dx + dy * dy));
+            controls.state = controls.STATE.DOLLY;
+            break;
+          case 3:
+            controls.state = controls.STATE.PAN;
+            controls.panStart.set(event.touches[0].pageX, event.touches[0].pageY);
+            break;
+        }
+        document.addEventListener('touchmove', onTouchMove, false);
+        document.addEventListener('touchend', onTouchEnd, false);
+      }
+      
+      function onTouchMove(event) {
+        event.preventDefault();
+        switch (event.touches.length) {
+          case 1:
+            if (controls.state === controls.STATE.ROTATE) {
+              controls.rotateEnd.set(event.touches[0].pageX, event.touches[0].pageY);
+              controls.rotateDelta.subVectors(controls.rotateEnd, controls.rotateStart);
+              const element = domElement;
+              const offset = camera.position.clone().sub(controls.target);
+              const spherical = new THREE.Spherical().setFromVector3(offset);
+              spherical.theta -= 2 * Math.PI * controls.rotateDelta.x / element.clientWidth;
+              spherical.phi -= 2 * Math.PI * controls.rotateDelta.y / element.clientHeight;
+              offset.setFromSpherical(spherical);
+              camera.position.copy(controls.target).add(offset);
+              camera.lookAt(controls.target);
+              controls.rotateStart.copy(controls.rotateEnd);
+            }
+            break;
+          case 2:
+            if (controls.state === controls.STATE.DOLLY) {
+              const dx = event.touches[0].pageX - event.touches[1].pageX;
+              const dy = event.touches[0].pageY - event.touches[1].pageY;
+              const distance = Math.sqrt(dx * dx + dy * dy);
+              controls.dollyEnd.set(0, distance);
+              controls.dollyDelta.subVectors(controls.dollyEnd, controls.dollyStart);
+              const dollySpeed = 0.05;
+              const offset = camera.position.clone().sub(controls.target);
+              if (controls.dollyDelta.y > 0) {
+                offset.multiplyScalar(1 - dollySpeed);
+              } else if (controls.dollyDelta.y < 0) {
+                offset.multiplyScalar(1 + dollySpeed);
+              }
+              camera.position.copy(controls.target).add(offset);
+              controls.dollyStart.copy(controls.dollyEnd);
+            }
+            break;
+          case 3:
+            if (controls.state === controls.STATE.PAN) {
+              controls.panEnd.set(event.touches[0].pageX, event.touches[0].pageY);
+              controls.panDelta.subVectors(controls.panEnd, controls.panStart);
+              const panSpeed = 0.1;
+              const element = domElement;
+              const deltaX = -2 * panSpeed * controls.panDelta.x / element.clientWidth;
+              const deltaY = 2 * panSpeed * controls.panDelta.y / element.clientHeight;
+              const offset = camera.position.clone().sub(controls.target);
+              const targetDistance = offset.length();
+              const panOffset = new THREE.Vector3();
+              const v = new THREE.Vector3();
+              v.setFromMatrixColumn(camera.matrix, 0);
+              v.multiplyScalar(deltaX * targetDistance);
+              panOffset.add(v);
+              v.setFromMatrixColumn(camera.matrix, 1);
+              v.multiplyScalar(deltaY * targetDistance);
+              panOffset.add(v);
+              camera.position.add(panOffset);
+              controls.target.add(panOffset);
+              controls.panStart.copy(controls.panEnd);
+            }
+            break;
+        }
+      }
+      
+      function onTouchEnd() {
+        document.removeEventListener('touchmove', onTouchMove, false);
+        document.removeEventListener('touchend', onTouchEnd, false);
+        controls.state = controls.STATE.NONE;
+      }
+      
+      function onContextMenu(event) { event.preventDefault(); }
+      
+      domElement.addEventListener('mousedown', onMouseDown, false);
+      domElement.addEventListener('wheel', onMouseWheel, false);
+      domElement.addEventListener('touchstart', onTouchStart, false);
+      domElement.addEventListener('contextmenu', onContextMenu, false);
+      
+      return controls;
+    }
+    
+    // --- Lighting Setup ---
+    function setupLighting(scene) {
+      const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+      scene.add(ambientLight);
+      
+      const directionalLight = new THREE.DirectionalLight(0xffffcc, 1);
+      directionalLight.position.set(50, 100, 30);
+      directionalLight.castShadow = true;
+      directionalLight.shadow.mapSize.width = 2048;
+      directionalLight.shadow.mapSize.height = 2048;
+      directionalLight.shadow.camera.near = 0.5;
+      directionalLight.shadow.camera.far = 500;
+      directionalLight.shadow.camera.left = -100;
+      directionalLight.shadow.camera.right = 100;
+      directionalLight.shadow.camera.top = 100;
+      directionalLight.shadow.camera.bottom = -100;
+      scene.add(directionalLight);
+      
+      const hemisphereLight = new THREE.HemisphereLight(0x87CEEB, 0x2d4c1e, 0.6);
+      scene.add(hemisphereLight);
+      
+      return {
+        ambient: ambientLight,
+        directional: directionalLight,
+        hemisphere: hemisphereLight
+      };
+    }
+    
+    // --- Castle Creation with Tower Glass Windows ---
+    function createCastle(scene) {
+      const castleGroup = new THREE.Group();
+      const stoneMaterial = new THREE.MeshPhongMaterial({ color: 0xececec, shininess: 20, flatShading: false });
+      const roofMaterial = new THREE.MeshPhongMaterial({ color: 0x3a5c75, shininess: 60 });
+      const windowMaterial = new THREE.MeshPhongMaterial({ color: 0x88ccff, transparent: true, opacity: 0.7, shininess: 90 });
+      
+      const base = new THREE.Mesh(new THREE.BoxGeometry(40, 10, 40), stoneMaterial);
+      base.position.y = 5;
+      base.castShadow = true;
+      base.receiveShadow = true;
+      castleGroup.add(base);
+      
+      const mainBuilding = new THREE.Mesh(new THREE.BoxGeometry(30, 25, 30), stoneMaterial);
+      mainBuilding.position.y = 22.5;
+      mainBuilding.castShadow = true;
+      mainBuilding.receiveShadow = true;
+      castleGroup.add(mainBuilding);
+      
+      function createTower(x, z, height, radius, segments) {
+        const towerGroup = new THREE.Group();
+        const towerBody = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * 1.2, height, segments), stoneMaterial);
+        towerBody.position.y = height / 2;
+        towerBody.castShadow = true;
+        towerBody.receiveShadow = true;
+        towerGroup.add(towerBody);
+        
+        const towerRoof = new THREE.Mesh(new THREE.ConeGeometry(radius * 1.2, height / 2, segments), roofMaterial);
+        towerRoof.position.y = height + height / 4;
+        towerRoof.castShadow = true;
+        towerGroup.add(towerRoof);
+        
+        if (Math.random() > 0.5) {
+          const flagPole = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 5, 8), new THREE.MeshPhongMaterial({ color: 0x8B4513 }));
+          flagPole.position.y = height + height / 2 + 2.5;
+          towerGroup.add(flagPole);
+          const flag = new THREE.Mesh(new THREE.PlaneGeometry(3, 1.5), new THREE.MeshPhongMaterial({ color: 0xFF0000, side: THREE.DoubleSide }));
+          flag.position.set(1.5, height + height / 2 + 4, 0);
+          flag.rotation.y = Math.PI / 2;
+          towerGroup.add(flag);
+        }
+        
+        const windowCount = Math.floor(height / 5);
+        for (let i = 0; i < windowCount; i++) {
+          const windowY = (height / (windowCount + 1)) * (i + 1);
+          for (let j = 0; j < 4; j++) {
+            const angle = j * Math.PI / 2;
+            const win = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 2.5), windowMaterial);
+            win.position.set(Math.sin(angle) * (radius + 0.1), windowY, Math.cos(angle) * (radius + 0.1));
+            win.rotation.y = angle;
+            towerGroup.add(win);
+          }
+        }
+        
+        towerGroup.position.set(x, 0, z);
+        return towerGroup;
+      }
+      
+      castleGroup.add(createTower(20, 20, 45, 6, 16));
+      castleGroup.add(createTower(-20, 20, 45, 6, 16));
+      castleGroup.add(createTower(20, -20, 45, 6, 16));
+      castleGroup.add(createTower(-20, -20, 45, 6, 16));
+      castleGroup.add(createTower(0, -5, 60, 8, 16));
+      castleGroup.add(createTower(15, 0, 40, 4, 12));
+      castleGroup.add(createTower(-15, 0, 40, 4, 12));
+      castleGroup.add(createTower(0, 15, 40, 4, 12));
+      
+      function createWindows(parent, width, height, x, y, z, rotationY) {
+        const windowFrame = new THREE.Mesh(
+          new THREE.BoxGeometry(width + 0.5, height + 0.5, 0.5),
+          stoneMaterial
+        );
+        windowFrame.position.set(x, y, z);
+        windowFrame.rotation.y = rotationY;
+        parent.add(windowFrame);
+        
+        const glass = new THREE.Mesh(
+          new THREE.PlaneGeometry(width, height),
+          new THREE.MeshPhongMaterial({ color: 0x88ccff, transparent: true, opacity: 0.6, shininess: 100, side: THREE.DoubleSide })
+        );
+        glass.position.set(x, y, z + 0.26);
+        glass.rotation.y = rotationY;
+        parent.add(glass);
+      }
+      
+      createWindows(castleGroup, 4, 6, 0, 25, 15.1, 0);
+      createWindows(castleGroup, 4, 6, 0, 25, -15.1, Math.PI);
+      
+      scene.add(castleGroup);
+      return castleGroup;
+    }
+    
+    // --- Terrain ---
+    function createTerrain(scene) {
+      const geometry = new THREE.PlaneGeometry(500, 500, 50, 50);
+      const material = new THREE.MeshPhongMaterial({ color: 0x228B22 });
+      const terrain = new THREE.Mesh(geometry, material);
+      terrain.rotation.x = -Math.PI / 2;
+      terrain.receiveShadow = true;
+      scene.add(terrain);
+    }
+    
+    // --- Mountains with Integrated White "Snow-Mountain" Caps ---
+    function createMountains(scene) {
+      const mountainMaterial = new THREE.MeshPhongMaterial({ color: 0x808080, flatShading: true });
+      for (let i = 0; i < 5; i++) {
+        // Create grey mountain (smooth cone with base aligned at y=0)
+        const distance = 80 + Math.random() * 100;
+        const angle = Math.random() * Math.PI * 2;
+        const x = Math.cos(angle) * distance;
+        const z = Math.sin(angle) * distance;
+        const height = 30 + Math.random() * 20;
+        const radius = 20 + Math.random() * 10;
+        const geo = new THREE.ConeGeometry(radius, height, 32);
+        const mountain = new THREE.Mesh(geo, mountainMaterial);
+        mountain.position.set(x, height / 2, z);
+        mountain.castShadow = true;
+        mountain.receiveShadow = true;
+        scene.add(mountain);
+        
+        // Create the white "snow-mountain" cap.
+        // White mountain: diameter ≈ 95% of grey's and height ≈ 105% of grey's.
+        const whiteHeight = height * 1.05;
+        const whiteRadius = radius * 0.95;
+        const whiteGeo = new THREE.ConeGeometry(whiteRadius, whiteHeight, 32);
+        // Apply a ripple effect to the base (vertices with y near 0) of the white cone.
+        const posAttr = whiteGeo.attributes.position;
+        const count = posAttr.count;
+        const rippleAmp = whiteRadius * 0.1;
+        const rippleFreq = 6;
+        for (let i = 0; i < count; i++) {
+          const y = posAttr.getY(i);
+          // Apply ripple only to the base ring (where y is near 0)
+          if (Math.abs(y) < 0.001) {
+            const xVal = posAttr.getX(i);
+            const zVal = posAttr.getZ(i);
+            const ang = Math.atan2(zVal, xVal);
+            const r = Math.sqrt(xVal * xVal + zVal * zVal);
+            const ripple = rippleAmp * Math.sin(rippleFreq * ang);
+            const newR = r + ripple;
+            posAttr.setX(i, newR * Math.cos(ang));
+            posAttr.setZ(i, newR * Math.sin(ang));
+          }
+        }
+        posAttr.needsUpdate = true;
+        // Use a material that is opaque for the grey mountain and render the white cap on top.
+        const whiteMat = new THREE.MeshPhongMaterial({ 
+          color: 0xffffff, 
+          emissive: 0xffffff, 
+          emissiveIntensity: 0.5,
+          transparent: true,
+          opacity: 0.9,
+          polygonOffset: true,
+          polygonOffsetFactor: -1,
+          polygonOffsetUnits: -4
+        });
+        const whiteMountain = new THREE.Mesh(whiteGeo, whiteMat);
+        // Align the bases: both white and grey mountains have their base at y=0.
+        whiteMountain.position.y = 0;
+        whiteMountain.renderOrder = 1;
+        mountain.add(whiteMountain);
+      }
+    }
+    
+    // --- Garden ---
+    function createGarden(scene) {
+      const treeMaterial = new THREE.MeshPhongMaterial({ color: 0x2E8B57 });
+      for (let i = 0; i < 50; i++) {
+        const treeHeight = 3 + Math.random() * 3;
+        const treeGeometry = new THREE.ConeGeometry(1, treeHeight, 8);
+        const tree = new THREE.Mesh(treeGeometry, treeMaterial);
+        tree.position.set((Math.random() - 0.5) * 200, treeHeight / 2, (Math.random() - 0.5) * 200);
+        tree.castShadow = true;
+        scene.add(tree);
+      }
+    }
+    
+    // --- Moat, Stone Wall & Extended Drawbridge ---
+    function createMoat(scene) {
+      const waterGeometry = new THREE.RingGeometry(40, 50, 64);
+      const waterMaterial = new THREE.MeshPhongMaterial({ color: 0x1E90FF, side: THREE.DoubleSide, transparent: true, opacity: 0.7 });
+      const water = new THREE.Mesh(waterGeometry, waterMaterial);
+      water.rotation.x = -Math.PI / 2;
+      water.position.y = 1;
+      scene.add(water);
+      
+      const wallGroup = new THREE.Group();
+      const segments = 20;
+      const radius = 50;
+      for (let i = 0; i < segments; i++) {
+        const theta = (i / segments) * Math.PI * 2;
+        const wallWidth = ((2 * Math.PI * radius) / segments) * 0.9;
+        const wallHeight = 3;
+        const wallDepth = 2;
+        const wallGeometry = new THREE.BoxGeometry(wallWidth, wallHeight, wallDepth);
+        const wallMaterial = new THREE.MeshPhongMaterial({ color: 0x888888 });
+        const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+        wall.position.x = Math.cos(theta) * radius;
+        wall.position.z = Math.sin(theta) * radius;
+        wall.position.y = wallHeight / 2 + 1;
+        wall.lookAt(new THREE.Vector3(0, wall.position.y, 0));
+        wallGroup.add(wall);
+      }
+      scene.add(wallGroup);
+      
+      const drawbridgeLength = 30;
+      const drawbridgeWidth = 5;
+      const drawbridgeThickness = 1;
+      const drawbridgeGeometry = new THREE.BoxGeometry(drawbridgeLength, drawbridgeThickness, drawbridgeWidth);
+      drawbridgeGeometry.translate(drawbridgeLength / 2, 0, 0);
+      const drawbridgeMaterial = new THREE.MeshPhongMaterial({ color: 0x8B4513, emissive: 0x552200 });
+      const drawbridge = new THREE.Mesh(drawbridgeGeometry, drawbridgeMaterial);
+      drawbridge.castShadow = true;
+      drawbridge.position.set(20, 1.5, 0);
+      scene.add(drawbridge);
+    }
+    
+    // --- Falling, Glowing Snow with Magical Texture ---
+    function createSnow(scene) {
+      const snowCount = 500;
+      const snowGeometry = new THREE.BufferGeometry();
+      const positions = [];
+      for (let i = 0; i < snowCount; i++) {
+        positions.push((Math.random() - 0.5) * 400);
+        positions.push(Math.random() * 120 + 80);
+        positions.push((Math.random() - 0.5) * 400);
+      }
+      snowGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      
+      function createSnowTexture() {
+        const size = 128;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const context = canvas.getContext('2d');
+        const gradient = context.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+        gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+        gradient.addColorStop(0.2, 'rgba(255, 255, 255, 0.8)');
+        gradient.addColorStop(0.4, 'rgba(255, 255, 255, 0.6)');
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        context.fillStyle = gradient;
+        context.fillRect(0, 0, size, size);
+        return new THREE.CanvasTexture(canvas);
+      }
+      
+      const snowMaterial = new THREE.PointsMaterial({ 
+        map: createSnowTexture(),
+        size: 3, 
+        transparent: true, 
+        opacity: 0.8,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        sizeAttenuation: true
+      });
+      const snowParticles = new THREE.Points(snowGeometry, snowMaterial);
+      scene.add(snowParticles);
+      
+      return { particles: snowParticles, enabled: false };
+    }
+    
+    // --- Magic Lights ---
+    function createMagicLights(scene) {
+      const magicLights = [];
+      for (let i = 0; i < 5; i++) {
+        const light = new THREE.PointLight(0xffaaff, 1, 20);
+        light.position.set((Math.random() - 0.5) * 20, 10 + Math.random() * 10, (Math.random() - 0.5) * 20);
+        light.castShadow = true;
+        const glowGeometry = new THREE.SphereGeometry(0.5, 16, 16);
+        const glowMaterial = new THREE.MeshBasicMaterial({ color: 0xffaaff });
+        const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+        light.add(glow);
+        light.userData = {
+          baseX: light.position.x,
+          baseZ: light.position.z,
+          offset: Math.random() * Math.PI * 2
+        };
+        scene.add(light);
+        magicLights.push(light);
+      }
+      return magicLights;
+    }
+    
+    // --- Sky and Stars for Day-Night Transition ---
+    function createSky() {
+      const geometry = new THREE.SphereGeometry(500, 32, 32);
+      const material = new THREE.ShaderMaterial({
+        uniforms: {
+          uTime: { value: 0.5 },
+          dayBottomColor: { value: new THREE.Color(0x87CEFA) },
+          dayTopColor: { value: new THREE.Color(0xB3E5FC) },
+          nightBottomColor: { value: new THREE.Color(0x000000) },
+          nightTopColor: { value: new THREE.Color(0x000033) }
+        },
+        vertexShader: `
+          varying vec2 vUv;
+          void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: `
+          uniform float uTime;
+          uniform vec3 dayBottomColor;
+          uniform vec3 dayTopColor;
+          uniform vec3 nightBottomColor;
+          uniform vec3 nightTopColor;
+          varying vec2 vUv;
+          void main() {
+            float d = distance(vUv, vec2(0.5, 0.5));
+            vec3 dayColor = mix(dayBottomColor, dayTopColor, 1.0 - d);
+            vec3 nightColor = mix(nightBottomColor, nightTopColor, 1.0 - d);
+            vec3 color = mix(dayColor, nightColor, uTime);
+            gl_FragColor = vec4(color, 1.0);
+          }
+        `,
+        side: THREE.BackSide,
+        depthWrite: false
+      });
+      const skyMesh = new THREE.Mesh(geometry, material);
+      return skyMesh;
+    }
+    
+    function createStars() {
+      const starCount = 2000;
+      const starGeometry = new THREE.BufferGeometry();
+      const starPositions = [];
+      for (let i = 0; i < starCount; i++) {
+        const theta = Math.random() * Math.PI;
+        const phi = Math.random() * 2 * Math.PI;
+        const r = 490;
+        const x = r * Math.sin(theta) * Math.cos(phi);
+        const y = r * Math.cos(theta);
+        const z = r * Math.sin(theta) * Math.sin(phi);
+        starPositions.push(x, y, z);
+      }
+      starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starPositions, 3));
+      const starMaterial = new THREE.PointsMaterial({
+        color: 0xffffff,
+        size: 2,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      });
+      const stars = new THREE.Points(starGeometry, starMaterial);
+      return stars;
+    }
+    
+    // --- UI Controls ---
+    function setupUIControls(camera, controls, lights, scene, snow, magicLights, sky, stars) {
+      const resetCameraBtn = document.getElementById('resetCamera');
+      const toggleAutoRotateBtn = document.getElementById('toggleAutoRotate');
+      const toggleInfoBtn = document.getElementById('toggleInfo');
+      const viewFrontBtn = document.getElementById('viewFront');
+      const viewBackBtn = document.getElementById('viewBack');
+      const viewTopBtn = document.getElementById('viewTop');
+      const viewOverallBtn = document.getElementById('viewOverall');
+      const toggleMagicModeBtn = document.getElementById('toggleMagicMode');
+      const toggleSnowBtn = document.getElementById('toggleSnow');
+      
+      let autoRotateEnabled = false;
+      let magicModeEnabled = false;
+      
+      resetCameraBtn.addEventListener('click', () => {
+        camera.position.set(40, 30, 40);
+        controls.target.set(0, 15, 0);
+        camera.lookAt(controls.target);
+      });
+      
+      toggleAutoRotateBtn.addEventListener('click', () => {
+        autoRotateEnabled = !autoRotateEnabled;
+        controls.autoRotate = autoRotateEnabled;
+        toggleAutoRotateBtn.textContent = autoRotateEnabled ? 'Stop Auto Rotate' : 'Start Auto Rotate';
+      });
+      
+      toggleInfoBtn.addEventListener('click', () => {
+        const infoDiv = document.getElementById('info');
+        if (infoDiv.style.display === 'none' || infoDiv.style.display === '') {
+          infoDiv.style.display = 'block';
+          toggleInfoBtn.textContent = 'Hide Info';
+        } else {
+          infoDiv.style.display = 'none';
+          toggleInfoBtn.textContent = 'Show Info';
+        }
+      });
+      
+      viewFrontBtn.addEventListener('click', () => {
+        camera.position.set(0, 20, 60);
+        controls.target.set(0, 15, 0);
+        camera.lookAt(controls.target);
+      });
+      
+      viewBackBtn.addEventListener('click', () => {
+        camera.position.set(0, 20, -60);
+        controls.target.set(0, 15, 0);
+        camera.lookAt(controls.target);
+      });
+      
+      viewTopBtn.addEventListener('click', () => {
+        camera.position.set(0, 80, 0.1);
+        controls.target.set(0, 15, 0);
+        camera.lookAt(controls.target);
+      });
+      
+      viewOverallBtn.addEventListener('click', () => {
+        camera.position.set(60, 40, 60);
+        controls.target.set(0, 15, 0);
+        camera.lookAt(controls.target);
+      });
+      
+      toggleMagicModeBtn.addEventListener('click', () => {
+        magicModeEnabled = !magicModeEnabled;
+        toggleMagicModeBtn.textContent = magicModeEnabled ? 'Disable Magic Mode' : 'Enable Magic Mode';
+      });
+      
+      toggleSnowBtn.addEventListener('click', () => {
+        snow.enabled = !snow.enabled;
+        toggleSnowBtn.textContent = snow.enabled ? 'Disable Snow' : 'Toggle Snow';
+      });
+      
+      const rotateSpeedSlider = document.getElementById('rotateSpeed');
+      const fogDensitySlider = document.getElementById('fogDensity');
+      const timeOfDaySlider = document.getElementById('timeOfDay');
+      
+      rotateSpeedSlider.addEventListener('input', (e) => {
+        controls.autoRotateSpeed = parseFloat(e.target.value);
+      });
+      
+      fogDensitySlider.addEventListener('input', (e) => {
+        const density = parseFloat(e.target.value);
+        scene.fog = new THREE.FogExp2(0x87CEFA, density);
+      });
+      
+      timeOfDaySlider.addEventListener('input', (e) => {
+        const time = parseFloat(e.target.value);
+        lights.directional.intensity = 1 - Math.abs(time - 0.5);
+        lights.hemisphere.intensity = 0.6 + time * 0.4;
+        sky.material.uniforms.uTime.value = time;
+        const starOpacity = time > 0.6 ? (time - 0.6) / 0.4 : 0;
+        stars.material.opacity = starOpacity;
+        const dayColor = new THREE.Color(0x87CEFA);
+        const nightColor = new THREE.Color(0x000000);
+        const fogColor = dayColor.lerp(nightColor, time);
+        scene.fog.color.copy(fogColor);
+      });
+      
+      const toggleControlsBtn = document.getElementById('toggleControls');
+      const controlPanel = document.getElementById('controlPanel');
+      toggleControlsBtn.addEventListener('click', () => {
+        controlPanel.style.display = (controlPanel.style.display === 'none' || controlPanel.style.display === '') ? 'block' : 'none';
+      });
+      
+      controls.magicMode = () => magicModeEnabled;
+    }
+    
+    // --- Main Initialization ---
+    function init() {
+      const scene = new THREE.Scene();
+      scene.fog = new THREE.FogExp2(0x87CEFA, 0.002);
+      
+      const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.set(40, 30, 40);
+      
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      document.body.appendChild(renderer.domElement);
+      
+      const controls = createOrbitControls(camera, renderer.domElement);
+      const lights = setupLighting(scene);
+      
+      createCastle(scene);
+      createTerrain(scene);
+      createMountains(scene);
+      createGarden(scene);
+      createMoat(scene);
+      const snow = createSnow(scene);
+      const magicLights = createMagicLights(scene);
+      
+      const sky = createSky();
+      scene.add(sky);
+      const stars = createStars();
+      scene.add(stars);
+      
+      setupUIControls(camera, controls, lights, scene, snow, magicLights, sky, stars);
+      
+      const clock = new THREE.Clock();
+      function animate() {
+        requestAnimationFrame(animate);
+        const delta = clock.getDelta();
+        controls.update();
+        
+        if (snow.enabled) {
+          const positions = snow.particles.geometry.attributes.position.array;
+          for (let i = 0; i < positions.length; i += 3) {
+            positions[i + 1] -= 10 * delta;
+            if (positions[i + 1] < 0) {
+              positions[i + 1] = Math.random() * 120 + 80;
+            }
+          }
+          snow.particles.geometry.attributes.position.needsUpdate = true;
+        }
+        
+        if (controls.magicMode && controls.magicMode()) {
+          magicLights.forEach(light => {
+            light.position.x = Math.sin(Date.now() * 0.001 + light.userData.offset) * 10 + light.userData.baseX;
+            light.position.z = Math.cos(Date.now() * 0.001 + light.userData.offset) * 10 + light.userData.baseZ;
+          });
+        }
+        
+        renderer.render(scene, camera);
+      }
+      animate();
+      
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+      
+      document.getElementById('loadingScreen').style.display = 'none';
+    }
+    
+    window.addEventListener('load', init);
+  </script>
+</body>
+</html>
